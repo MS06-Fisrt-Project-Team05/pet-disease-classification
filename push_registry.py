@@ -30,13 +30,21 @@ def push_model_to_registry():
     model_name = "resnet-model"
     model_description = "ResNet 모델"
     
+    # 현재 등록된 모델의 최신 버전 확인
+    try:
+        models = ml_client.models.list(name=model_name)
+        versions = [int(m.version) for m in models]
+        next_version = str(max(versions) + 1) if versions else "1"
+    except:
+        next_version = "1"
+    
     # 모델 엔티티 생성 및 메타데이터 설정
     model = Model(
-        path=model_path,          # 모델 파일 경로
-        name=model_name,      # 등록될 모델의 이름
-        description=model_description, # 모델 설명
-        type="custom_model",      # 모델 유형 (사용자 정의 모델)
-        version="1"               # 모델 버전
+        path=model_path,
+        name=model_name,
+        description=model_description,
+        type="custom_model",
+        version=next_version
     )
 
     # 모델을 Azure ML 모델 레지스트리에 등록

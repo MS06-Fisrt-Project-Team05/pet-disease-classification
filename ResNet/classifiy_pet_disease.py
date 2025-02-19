@@ -2,8 +2,10 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from datetime import datetime
 from torchvision import datasets, models, transforms
 from torch.utils.data import DataLoader
+import json
 
 data_dir = '../data/selected/dog'
 train_dir = os.path.join(data_dir, 'train')
@@ -36,6 +38,17 @@ dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
 
 class_names = image_datasets['train'].classes
 num_classes = len(class_names)
+
+# 클래스 정보를 같은 경로에 json 파일로 저장
+base_class_names_path = "class_names.json"
+if os.path.exists(base_class_names_path):
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    class_names_path = f"class_names_{timestamp}.json"
+else:
+    class_names_path = base_class_names_path
+
+with open(class_names_path, 'w', encoding='utf-8') as f:
+    json.dump(class_names, f, ensure_ascii=False, indent=4)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

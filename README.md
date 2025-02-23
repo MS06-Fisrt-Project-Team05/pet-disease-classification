@@ -61,7 +61,19 @@
   - 개/고양이 데이터셋 선택 가능
   - 데이터 증강(augmentation) 적용
   - 학습 과정 모니터링 및 best 모델 저장
-  - 사용 예시:
+  - 데이터 경로 설정 필요:
+    ```python
+    # train_skin_disease.py 내부 경로 설정 예시
+    # 방법 1: 기본 경로 사용
+    base_path = f"../../data/good-data/{animal_type}/selected"
+    
+    # 방법 2: AIHub 원본 데이터 경로 사용
+    base_path = f"../../data/aihub/{animal_type}"
+    
+    # 방법 3: 절대 경로 사용
+    base_path = f"/home/user/projects/data/{animal_type}"
+    ```
+  - 실행 예시:
     ```bash
     python train_skin_disease.py --model resnet --animal dog
     or

@@ -16,7 +16,7 @@ class_files = sorted(glob.glob("class_names*.json"), reverse=True)
 class_file = class_files[0] if class_files else "class_names.json"
 
 # 업로드할 파일들
-model_file = "resnet50_dog_disease.pth"
+model_file = "efficientnet_cat_best_20250223011242.pth"
 
 # Blob Storage 업로드 함수
 def upload_to_blob(file_path, blob_name):
@@ -40,7 +40,7 @@ def upload_to_blob(file_path, blob_name):
         print(f"❌ {blob_name} 업로드 실패: {e}")
 
 # 최신 모델과 클래스 정보 업로드
-upload_to_blob(model_file, "resnet50_dog_disease.pth")
+upload_to_blob(model_file, model_file)
 upload_to_blob(class_file, os.path.basename(class_file))  # 원본 파일명 유지
 
 print("🎉 모든 파일 업로드 완료!")

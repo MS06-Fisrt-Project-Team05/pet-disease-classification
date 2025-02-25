@@ -13,10 +13,10 @@ CONTAINER_NAME = "models"
 
 # 최신 class_names.json 파일 찾기
 class_files = sorted(glob.glob("class_names*.json"), reverse=True)
-class_file = class_files[0] if class_files else "class_names.json"
+class_file = "class_names_cat.json"
 
 # 업로드할 파일들
-model_file = "efficientnet_cat_best_20250223011242.pth"
+model_file = "cat_full_ensemble_0224_0121_acc0.8125.pth"
 
 # Blob Storage 업로드 함수
 def upload_to_blob(file_path, blob_name):

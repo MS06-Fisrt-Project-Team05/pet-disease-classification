@@ -17,7 +17,10 @@ from torchvision import datasets, transforms, models
 # =====================================
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Skin Disease Classification Model")
-    parser.add_argument("--model", type=str, default="resnet", choices=["resnet", "efficientnet", "ensemble"])
+    parser.add_argument("--model", type=str, default="resnet50", 
+                        choices=["resnet18", "resnet50", 
+                                 "efficientnet_b0", "efficientnet_b4", 
+                                 "ensemble"])
     parser.add_argument("--animal", type=str, default="dog", choices=["dog", "cat"])
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--freeze_epochs", type=int, default=10)
@@ -55,9 +58,10 @@ def get_dataloaders(animal_type, batch_size, aug_strength=0.5):
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    # 클래스 밸런스 조정
+    # 클래스 밸런스 조정 (WeightedRandomSampler)
     train_dataset = datasets.ImageFolder(train_dir, transform=train_transform)
-    class_counts = np.array([len([x for x in train_dataset.samples if x[1] == cls]) for cls in range(len(train_dataset.classes))])
+    class_counts = np.array([len([x for x in train_dataset.samples if x[1] == cls]) 
+                             for cls in range(len(train_dataset.classes))])
     class_weights = 1. / class_counts
     sample_weights = class_weights[train_dataset.targets]
     sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
@@ -73,17 +77,33 @@ def get_dataloaders(animal_type, batch_size, aug_strength=0.5):
 # 3. 모델 구성
 # =====================================
 def build_model(model_name, num_classes):
-    if model_name == "resnet":
+    if model_name == "resnet18":
         model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         model.fc = nn.Sequential(
             nn.Dropout(0.7),
             nn.Linear(model.fc.in_features, num_classes)
         )
-    elif model_name == "efficientnet":
+    elif model_name == "resnet50":
+        model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        model.fc = nn.Sequential(
+            nn.Dropout(0.7),
+            nn.Linear(model.fc.in_features, num_classes)
+        )
+    elif model_name == "efficientnet_b0":
         model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
         model.classifier[1] = nn.Sequential(
             nn.Dropout(0.7),
             nn.Linear(model.classifier[1].in_features, 256),
+            nn.ReLU(),
+            nn.Linear(256, num_classes)
+        )
+    elif model_name == "efficientnet_b4":
+        model = models.efficientnet_b4(weights=models.EfficientNet_B4_Weights.DEFAULT)
+        # B4는 classifier 구조가 [Dropout, Linear]이므로 classifier[1]이 최종 Linear
+        in_features = model.classifier[1].in_features
+        model.classifier[1] = nn.Sequential(
+            nn.Dropout(0.7),
+            nn.Linear(in_features, 256),
             nn.ReLU(),
             nn.Linear(256, num_classes)
         )
@@ -123,8 +143,13 @@ def train_epoch(model, loader, criterion, optimizer, device, mixup_alpha):
         optimizer.step()
         
         total_loss += loss.item() * inputs.size(0)
-        preds = outputs.argmax(dim=1)
-        correct += (lam * preds.eq(labels_a).sum().item() + (1 - lam) * preds.eq(labels_b).sum().item()) if mixup_alpha > 0 else preds.eq(labels).sum().item()
+        with torch.no_grad():
+            preds = outputs.argmax(dim=1)
+            if mixup_alpha > 0:
+                correct += (lam * preds.eq(labels_a).sum().item() 
+                           + (1 - lam) * preds.eq(labels_b).sum().item())
+            else:
+                correct += preds.eq(labels).sum().item()
     
     return total_loss / len(loader.dataset), correct / len(loader.dataset)
 
@@ -145,7 +170,7 @@ def validate(model, loader, criterion, device):
     return total_loss / len(loader.dataset), correct / len(loader.dataset)
 
 # =====================================
-# 5. 앙상블 관련 함수
+# 5. 앙상블 관련 함수 (소프트 보팅)
 # =====================================
 class EnsembleModel(nn.Module):
     def __init__(self, models):
@@ -153,6 +178,7 @@ class EnsembleModel(nn.Module):
         self.models = nn.ModuleList(models)
         
     def forward(self, x):
+        # 각각의 모델 출력(logits)을 평균 -> 소프트 보팅
         outputs = [model(x) for model in self.models]
         return torch.mean(torch.stack(outputs), dim=0)
 
@@ -161,10 +187,9 @@ def train_ensemble(models, train_loaders, val_loader, num_classes, device, args)
     best_models = []  # 최고 성능 모델 저장용
     optimizers = [optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay) for model in models]
     
-    # 모델 정보 출력 추가
     print("\n=== Ensemble Training Configuration ===")
     print(f"Total Models: {len(models)}")
-    print(f"Model Types: ResNet18 + EfficientNet-B0")
+    print(f"Model Types: {[type(m).__name__ for m in models]}")
     print(f"Individual Learning Rate: {args.lr}")
     print(f"Mixup Alpha: {args.mixup_alpha}\n")
 
@@ -175,9 +200,9 @@ def train_ensemble(models, train_loaders, val_loader, num_classes, device, args)
         # 각 모델별 학습
         for i, (model, optimizer) in enumerate(zip(models, optimizers)):
             model.train()
-            print(f"\nTraining Model {i+1} ({'ResNet18' if i==0 else 'EfficientNet-B0'})")
+            print(f"\nTraining Model {i+1}")
             train_loss, train_acc = train_epoch(model, train_loaders[i], nn.CrossEntropyLoss(), 
-                                               optimizer, device, args.mixup_alpha)
+                                                optimizer, device, args.mixup_alpha)
             print(f"Model {i+1} - Train Loss: {train_loss:.4f} | Acc: {train_acc:.4f}")
         
         # 앙상블 검증
@@ -188,13 +213,10 @@ def train_ensemble(models, train_loaders, val_loader, num_classes, device, args)
         # 최고 성능 모델 갱신 시 저장
         if val_acc > best_acc:
             best_acc = val_acc
-            best_models = [copy.deepcopy(model.state_dict()) for model in models]  # 모델 상태 깊은 복사
+            best_models = [copy.deepcopy(model.state_dict()) for model in models]
             print(f"New best ensemble found at epoch {epoch+1} with acc: {best_acc:.4f}")
 
-    # 최종 모델 저장 (학습 종료 후 한 번만 실행)
-    save_time = datetime.now().strftime("%m%d_%H%M")
-    
-    # 최종 모델 로드 및 재검증
+    # 최종 모델 로드 및 저장
     for i, model in enumerate(models):
         model.load_state_dict(best_models[i])
     final_ensemble = EnsembleModel(models)
@@ -203,12 +225,13 @@ def train_ensemble(models, train_loaders, val_loader, num_classes, device, args)
     print(f"\n=== Final Ensemble Evaluation ===")
     print(f"Best Ensemble Accuracy: {final_acc:.4f}")
     
-    # 저장 시 최종 검증 정확도 사용
+    save_time = datetime.now().strftime("%m%d_%H%M")
     ensemble_save_name = f"{args.animal}_full_ensemble_{save_time}_acc{final_acc:.4f}.pth"
     torch.save({
-        'resnet': best_models[0],
-        'efficientnet': best_models[1],
+        'model1': best_models[0],
+        'model2': best_models[1],
     }, ensemble_save_name)
+    print(f"Ensemble model saved as {ensemble_save_name}.")
 
 # =====================================
 # 6. 메인 함수
@@ -217,7 +240,6 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # 하이퍼파라미터 출력 추가
     print("\n=== Training Configuration ===")
     print(f"Animal Type: {args.animal.upper()}")
     print(f"Model Type: {args.model.upper()}")
@@ -231,7 +253,6 @@ def main():
     train_loader, val_loader, class_names = get_dataloaders(args.animal, args.batch_size, args.aug_strength)
     num_classes = len(class_names)
     
-    # 클래스 정보 출력 추가
     print("\n=== Class Information ===")
     print(f"Total Classes: {num_classes}")
     print(f"Class Names: {class_names}\n")
@@ -240,7 +261,6 @@ def main():
     if args.model != "ensemble":
         model = build_model(args.model, num_classes).to(device)
         
-        # 모델 구조 출력 추가
         print("\n=== Model Architecture ===")
         print(model)
         print(f"Trainable Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}\n")
@@ -249,12 +269,13 @@ def main():
         scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
         
         best_acc = 0.0
+        best_state = None
         for epoch in range(args.epochs):
             print(f"\nEpoch {epoch+1}/{args.epochs}")
             print(f"Current LR: {optimizer.param_groups[0]['lr']:.2e}")
             
             train_loss, train_acc = train_epoch(model, train_loader, nn.CrossEntropyLoss(), 
-                                               optimizer, device, args.mixup_alpha)
+                                                optimizer, device, args.mixup_alpha)
             val_loss, val_acc = validate(model, val_loader, nn.CrossEntropyLoss(), device)
             scheduler.step()
             
@@ -262,17 +283,28 @@ def main():
             
             if val_acc > best_acc:
                 best_acc = val_acc
+                best_state = copy.deepcopy(model.state_dict())
                 save_time = datetime.now().strftime("%m%d_%H%M")
                 save_name = f"{args.animal}_best_{args.model}_{save_time}_acc{val_acc:.4f}.pth"
-                torch.save(model.state_dict(), save_name)
-                print(f"\nSaved new best model: {save_name}")
-
-    # 앙상블 학습
+                torch.save(best_state, save_name)
+                print(f"Saved new best model: {save_name}")
+                
+        # 최종 결과 출력
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        print(f"\n=== Final Best Accuracy: {best_acc:.4f} ===")
+        
+    # 앙상블 학습 (ResNet50 + EfficientNet-B4 예시)
     else:
-        models = [build_model('resnet', num_classes), build_model('efficientnet', num_classes)]
-        models = [model.to(device) for model in models]
-        train_loaders = [get_dataloaders(args.animal, args.batch_size, aug_strength=i*0.2)[0] for i in range(len(models))]
-        train_ensemble(models, train_loaders, val_loader, num_classes, device, args)
+        model1 = build_model('resnet50', num_classes)
+        model2 = build_model('efficientnet_b4', num_classes)
+        
+        # 모델별로 다른 증강 강도를 시도할 수 있음 (예: model1=0.5, model2=0.7)
+        train_loader1, _, _ = get_dataloaders(args.animal, args.batch_size, aug_strength=0.5)
+        train_loader2, _, _ = get_dataloaders(args.animal, args.batch_size, aug_strength=0.7)
+        
+        models = [model1.to(device), model2.to(device)]
+        train_ensemble(models, [train_loader1, train_loader2], val_loader, num_classes, device, args)
 
 if __name__ == "__main__":
     main()

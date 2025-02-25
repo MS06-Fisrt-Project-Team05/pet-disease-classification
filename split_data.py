@@ -74,7 +74,7 @@ input_folder = "../../data/good-data/cat/no-selected"
 output_folder = "../../data/good-data/cat/selected"
 
 # 방법 1: 모든 클래스를 동일한 개수로 맞추기
-balance_dataset(input_folder, output_folder, balance_mode="equal", sample_size=264)
+balance_dataset(input_folder, output_folder, balance_mode="original")
 
 # 방법 2: 원본 데이터 비율 유지하기
 # balance_dataset(input_folder, output_folder, balance_mode="original")
